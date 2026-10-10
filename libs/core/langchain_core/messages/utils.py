@@ -2376,14 +2376,18 @@ def count_tokens_approximately(
             content = repr(message.content)  # type: ignore[unreachable]
             message_chars += len(content)
 
-        if (
-            isinstance(message, AIMessage)
-            # exclude Anthropic format as tool calls are already included in the content
-            and not isinstance(message.content, list)
-            and message.tool_calls
-        ):
-            tool_calls_content = repr(message.tool_calls)
-            message_chars += len(tool_calls_content)
+        if isinstance(message, AIMessage) and message.tool_calls:
+            # Skip counting tool_calls only when they are already embedded as
+            # tool_use content blocks (Anthropic streaming format).  A list
+            # content that is empty or contains only text/image blocks does NOT
+            # include the tool call payloads, so we must still count them.
+            tool_use_in_content = isinstance(message.content, list) and any(
+                isinstance(b, dict) and b.get("type") == "tool_use"
+                for b in message.content
+            )
+            if not tool_use_in_content:
+                tool_calls_content = repr(message.tool_calls)
+                message_chars += len(tool_calls_content)
 
         if isinstance(message, ToolMessage):
             message_chars += len(message.tool_call_id)

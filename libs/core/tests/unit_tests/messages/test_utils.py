@@ -1564,6 +1564,47 @@ def test_count_tokens_approximately_tool_calls() -> None:
     assert count_tokens_approximately(messages) == 29
 
 
+def test_count_tokens_approximately_tool_calls_with_list_content() -> None:
+    """Regression: tool_calls must be counted when AIMessage.content is a list.
+
+    Previously, `not isinstance(message.content, list)` short-circuited
+    tool-call counting for *any* list content, including an empty list or a
+    list that contains only text blocks (i.e. does NOT embed the tool calls
+    as `tool_use` content blocks the way Anthropic streaming does).
+    """
+    tool_calls = [{"name": "find_owner", "args": {"query": "x" * 100}, "id": "c1"}]
+    # Empty-list content: tool_calls must still be counted.
+    msg_empty = AIMessage(content=[], tool_calls=tool_calls)
+    # Text-block-only content: tool_calls must still be counted.
+    msg_text_block = AIMessage(
+        content=[{"type": "text", "text": ""}], tool_calls=tool_calls
+    )
+    # String content baseline — this was always counted correctly.
+    msg_str = AIMessage(content="", tool_calls=tool_calls)
+
+    count_empty = count_tokens_approximately([msg_empty])
+    count_text_block = count_tokens_approximately([msg_text_block])
+    count_str = count_tokens_approximately([msg_str])
+
+    assert count_empty == count_str, (
+        f"empty-list content ({count_empty}) should equal string content ({count_str})"
+    )
+    assert count_text_block == count_str, (
+        f"text-block content ({count_text_block}) should equal "
+        f"string content ({count_str})"
+    )
+
+    # Anthropic tool_use blocks: tool_calls should NOT be double-counted.
+    msg_tool_use = AIMessage(
+        content=[{"type": "tool_use", "id": "c1", "name": "find_owner", "input": {}}],
+        tool_calls=tool_calls,
+    )
+    count_tool_use = count_tokens_approximately([msg_tool_use])
+    # The tool_use block itself gets counted via repr(block), but tool_calls
+    # are skipped — so the count must be less than string+tool_calls.
+    assert count_tool_use < count_str + count_tokens_approximately([msg_str])
+
+
 def test_count_tokens_approximately_custom_token_length() -> None:
     messages = [
         # 11 chars + 4 role chars -> (4 tokens of length 4 / 8 tokens of length 2) + 3
